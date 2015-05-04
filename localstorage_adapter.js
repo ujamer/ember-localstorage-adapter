@@ -2,6 +2,9 @@
 /*global DS*/
 (function () {
   'use strict';
+  var singularize = Ember.Inflector.inflector.singularize;
+  var map = Ember.ArrayPolyfills.map;
+  var camelize = Ember.String.camelize;
 
   DS.LSSerializer = DS.JSONSerializer.extend({
 
@@ -9,7 +12,6 @@
       var key = relationship.key;
       var payloadKey = this.keyForRelationship ? this.keyForRelationship(key, "hasMany") : key;
       var relationshipType = snapshot.type.determineRelationshipType(relationship);
-
       if (relationshipType === 'manyToNone' ||
           relationshipType === 'manyToMany' ||
           relationshipType === 'manyToOne') {
@@ -88,8 +90,98 @@
       return payload.map(function(json) {
         return this.extractSingle(store, type, json);
       }, this);
-    }
+    },
 
+
+    /**
+    This method allows you to push a payload containing top-level
+    collections of records organized per type.
+    ```js
+    {
+      "posts": [{
+        "id": "1",
+        "title": "Rails is omakase",
+        "author", "1",
+        "comments": [ "1" ]
+      }],
+      "comments": [{
+        "id": "1",
+        "body": "FIRST"
+      }],
+      "users": [{
+        "id": "1",
+        "name": "@d2h"
+      }]
+    }
+    ```
+    It will first normalize the payload, so you can use this to push
+    in data streaming in from your server structured the same way
+    that fetches and saves are structured.
+    @method pushPayload
+    @param {DS.Store} store
+    @param {Object} payload
+  */
+  pushPayload: function(store, rawPayload) {
+    var payload = this.normalizePayload(rawPayload);
+    //console.log(payload);
+    for (var prop in payload) {
+      var typeName = this.typeForRoot(prop);
+      //console.log(typeName);
+      if (!store.modelFactoryFor(typeName, prop)) {
+        Ember.warn(this.warnMessageNoModelForKey(prop, typeName), false);
+        continue;
+      }
+      var type = store.modelFor(typeName);
+      var typeSerializer = store.serializerFor(type);
+
+      /*jshint loopfunc:true*/
+      var normalizedArray = map.call(Ember.makeArray(payload[prop]), function(hash) {
+        return typeSerializer.normalize(type, hash, prop);
+      }, this);
+
+      store.pushMany(typeName, normalizedArray);
+    }
+  },
+
+  /**
+    This method is used to convert each JSON root key in the payload
+    into a typeKey that it can use to look up the appropriate model for
+    that part of the payload. By default the typeKey for a model is its
+    name in camelCase, so if your JSON root key is 'fast-car' you would
+    use typeForRoot to convert it to 'fastCar' so that Ember Data finds
+    the `FastCar` model.
+    If you diverge from this norm you should also consider changes to
+    store._normalizeTypeKey as well.
+    For example, your server may return prefixed root keys like so:
+    ```js
+    {
+      "response-fast-car": {
+        "id": "1",
+        "name": "corvette"
+      }
+    }
+    ```
+    In order for Ember Data to know that the model corresponding to
+    the 'response-fast-car' hash is `FastCar` (typeKey: 'fastCar'),
+    you can override typeForRoot to convert 'response-fast-car' to
+    'fastCar' like so:
+    ```js
+    App.ApplicationSerializer = DS.RESTSerializer.extend({
+      typeForRoot: function(root) {
+        // 'response-fast-car' should become 'fast-car'
+        var subRoot = root.substring(9);
+        // _super normalizes 'fast-car' to 'fastCar'
+        return this._super(subRoot);
+      }
+    });
+    ```
+    @method typeForRoot
+    @param {String} key
+    @return {String} the model's typeKey
+  */
+  typeForRoot: function(key) {
+    return camelize(Ember.Inflector.inflector.singularize(key));
+  }
   });
 
   DS.LSAdapter = DS.Adapter.extend(Ember.Evented, {
