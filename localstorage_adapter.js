@@ -15,7 +15,7 @@
       if (relationshipType === 'manyToNone' ||
           relationshipType === 'manyToMany' ||
           relationshipType === 'manyToOne') {
-        json[payloadKey] = snapshot.hasMany(key).mapBy('id');
+        json[payloadKey] = snapshot.hasMany(key, { ids: true });
         // TODO support for polymorphic manyToNone and manyToMany relationships
       }
     },
